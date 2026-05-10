@@ -49,8 +49,15 @@ export async function POST(request: NextRequest) {
       throw new Error("No public sources were found for this query");
     }
   } catch (error) {
+    const message = error instanceof Error ? error.message : "Source collection failed";
+    console.error("[CrisisSignal] source collection failed", message);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Source collection failed" },
+      {
+        error: message,
+        stage: "source_collection",
+        hint:
+          "Check ANAKIN_API_KEY in the deployment environment and confirm the Anakin search API is reachable."
+      },
       { status: 502 }
     );
   }

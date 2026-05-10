@@ -120,12 +120,31 @@ export async function collectSources(params: {
 }): Promise<SourceDocument[]> {
   const searchPrompts = buildSearchPrompts(params);
   const perSearchLimit = Math.max(4, Math.ceil((params.maxSources + 8) / searchPrompts.length));
-  const resultSets = await Promise.all(
-    searchPrompts.map((prompt) =>
-      searchWeb(prompt, perSearchLimit).catch(() => [] as SearchResult[])
-    )
-  );
-  const selected = rankResults(dedupeByUrl(resultSets.flat()), params).slice(0, params.maxSources);
+  const searchErrors: string[] = [];
+  const rawResults: SearchResult[] = [];
+
+  for (const prompt of searchPrompts) {
+    try {
+      rawResults.push(...(await searchWeb(prompt, perSearchLimit)));
+    } catch (error) {
+      searchErrors.push(errorToMessage(error));
+    }
+
+    if (dedupeByUrl(rawResults).length >= params.maxSources + 4) {
+      break;
+    }
+
+    await delay(250);
+  }
+
+  const dedupedResults = dedupeByUrl(rawResults);
+
+  if (dedupedResults.length === 0 && searchErrors.length > 0) {
+    const details = uniqueStrings(searchErrors).slice(0, 3).join(" | ");
+    throw new Error(`Anakin search failed: ${details}`);
+  }
+
+  const selected = rankResults(dedupedResults, params).slice(0, params.maxSources);
 
   const documents = await Promise.all(
     selected.map(async (result, index) => {
@@ -218,6 +237,15 @@ function toSourceDocument(
 function trimText(value: string, limit: number) {
   const compact = value.replace(/\s+/g, " ").trim();
   return compact.length > limit ? `${compact.slice(0, limit - 1)}...` : compact;
+}
+
+function errorToMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  return typeof error === "string" ? error : "Unknown error";
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function classifySource(url: string): SourceKind {
